@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ml">
+<head>
+  <meta charset="utf-8" />
+  <title>Amaya — Playful 3D Poster</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body { height:100%; margin:0; font-family:system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial; background:#0b1020; color:#fff; overflow:hidden; }
+    #container { width:100%; height:100%; position:relative; }
+    canvas { display:block; }
+
+    .top-bar {
+      position:absolute; left:50%; transform:translateX(-50%); top:16px;
+      display:flex; gap:12px; align-items:center; z-index:20;
+      background:rgba(255,255,255,0.06); padding:8px 12px; border-radius:12px;
+      backdrop-filter: blur(6px);
+    }
+    .title { font-weight:700; font-size:16px; }
+    .btn {
+      background:linear-gradient(90deg,#ff7ab6,#7ad3ff);
+      border:none; padding:8px 12px; border-radius:10px; cursor:pointer;
+      font-weight:700; color:#082032;
+    }
+
+    .big-name {
+      position:absolute; left:50%; top:12%; transform: translateX(-50%);
+      font-size:24px; font-weight:800; letter-spacing:2px; z-index:15;
+      pointer-events:none; text-align:center;
+    }
+    .footer {
+      position:absolute; right:12px; bottom:10px; z-index:12; opacity:0.75; font-size:12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div class="top-bar">
+      <div class="title">Playful Poster — keep it friendly 🙂</div>
+      <button id="trollBtn" class="btn">TROLL!</button>
+      <button id="calmBtn" class="btn" style="background:linear-gradient(90deg,#7bffcb,#bde0ff)">CALM</button>
+    </div>
+
+    <div class="big-name">AMAYA</div>
+    <div class="footer">Put <code>1.png</code> next to this file (poster 150×200 ratio)</div>
+  </div>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+
+  <script>
+  // Scene setup
+  const container = document.getElementById('container');
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x0b1020, 0.03);
+
+  const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.8, 6);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+
+  // Lights
+  const hemi = new THREE.HemisphereLight(0xfffbe6, 0x071020, 0.9);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.7);
+  dir.position.set(5,10,3);
+  scene.add(dir);
+
+  // Center object (for visual interest)
+  const geom = new THREE.TorusKnotGeometry(0.8, 0.24, 140, 20);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffb7e1, metalness:0.45, roughness:0.25, emissive:0x120516, emissiveIntensity:0.05
+  });
+  const knot = new THREE.Mesh(geom, mat);
+  knot.position.set(-1.6, 0.6, 0);
+  scene.add(knot);
+
+  // Poster (flat board) with user's image "1.png"
+  // Poster ratio: 150x200 -> aspect = 150/200 = 0.75 (width/height)
+  const posterHeight = 2.0; // world units
+  const posterWidth = posterHeight * (150/200); // 0.75 * height
+  const posterGeometry = new THREE.PlaneGeometry(posterWidth, posterHeight, 1, 1);
+
+  // Load texture from local file 1.png (must be in same folder)
+  const loader = new THREE.TextureLoader();
+  const posterMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+
+  loader.load(
+    './1.png',
+    (tex) => {
+      tex.encoding = THREE.sRGBEncoding;
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      posterMaterial.map = tex;
+      posterMaterial.needsUpdate = true;
+    },
+    undefined,
+    (err) => {
+      console.warn('Could not load 1.png. Make sure it is in the same folder as this HTML file.', err);
+      // fallback: plain color
+      posterMaterial.color.setHex(0x444444);
+    }
+  );
+
+  const poster = new THREE.Mesh(posterGeometry, posterMaterial);
+  poster.position.set(1.6, 0.9, 0); // place it to the right of the knot
+  poster.rotation.y = -0.12;
+  poster.receiveShadow = true;
+  scene.add(poster);
+
+  // Ground faint plane for depth
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(20,20), new THREE.MeshBasicMaterial({ color:0x051024, opacity:0.4, transparent:true }));
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -1.6;
+  scene.add(ground);
+
+  // Malayalam phrases as sprite-text (floating)
+  const phrases = ['മാമൻ വന്നു','നജീബ് ഇക്ക','നടൻ മുട്ട'];
+  const floatingGroup = new THREE.Group();
+  scene.add(floatingGroup);
+
+  function makeTextSprite(text, fontSize=80, color='#ffffff') {
+    const c = document.createElement('canvas');
+    const scale = 2;
+    c.width = 512 * scale;
+    c.height = 128 * scale;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0,0,c.width,c.height);
+    // background slightly translucent for readability
+    ctx.fillStyle = 'rgba(0,0,0,0.0)';
+    ctx.fillRect(0,0,c.width,c.height);
+
+    ctx.fillStyle = color;
+    // Choose a font that supports Malayalam; fallback typical system font
+    ctx.font = `${Math.round(fontSize*scale)}px "Noto Sans Malayalam", "Arial"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // shrink text to fit if too long
+    const lines = wrapText(ctx, text, c.width * 0.86);
+    let y = c.height/2 - (lines.length-1) * (fontSize*scale*0.45);
+    for (const line of lines) {
+      ctx.fillText(line, c.width/2, y);
+      y += fontSize*scale*0.9;
+    }
+
+    const texture = new THREE.CanvasTexture(c);
+    texture.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+    const sprite = new THREE.Sprite(mat);
+    // scale sprite to visible world size
+    sprite.scale.set(1.2, 0.35 * lines.length, 1);
+    return sprite;
+  }
+
+  // helper to wrap text on canvas
+  function wrapText(ctx, text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let line = '';
+    for (let n = 0; n < words.length; n++) {
+      const testLine = line + words[n] + ' ';
+      const metrics = ctx.measureText(testLine);
+      const testWidth = metrics.width;
+      if (testWidth > maxWidth && n > 0) {
+        lines.push(line.trim());
+        line = words[n] + ' ';
+      } else {
+        line = testLine;
+      }
+    }
+    lines.push(line.trim());
+    return lines;
+  }
+
+  // create a few floating copies of each phrase at random places
+  const floatingSprites = [];
+  for (let i = 0; i < 12; i++) {
+    const text = phrases[i % phrases.length];
+    const s = makeTextSprite(text, 80, '#fff');
+    s.position.set((Math.random()-0.5)*6, (Math.random()*2)+0.2, (Math.random()-0.5)*6);
+    s.userData = { vel: new THREE.Vector3((Math.random()-0.5)*0.008, (Math.random()-0.5)*0.006, (Math.random()-0.5)*0.008) };
+    floatingGroup.add(s);
+    floatingSprites.push(s);
+  }
+
+  // small decorative emoji sprites (optional)
+  function makeEmojiSprite(emoji) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.font = '96px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, 64, 64);
+    const tex = new THREE.CanvasTexture(c);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+    return new THREE.Sprite(mat);
+  }
+  const emojis = ['🤪','🎉','✨','😄'];
+  for (let i=0;i<10;i++){
+    const e = makeEmojiSprite(emojis[i % emojis.length]);
+    e.position.set((Math.random()-0.5)*8, Math.random()*3, (Math.random()-0.5)*8);
+    e.scale.set(0.7,0.7,1);
+    e.userData = { vel: new THREE.Vector3((Math.random()-0.5)*0.01, (Math.random()-0.5)*0.007, (Math.random()-0.5)*0.01) };
+    scene.add(e);
+    floatingSprites.push(e);
+  }
+
+  // animate
+  let t = 0;
+  function animate(){
+    t += 0.01;
+    requestAnimationFrame(animate);
+
+    knot.rotation.x = Math.sin(t*0.6)*0.35;
+    knot.rotation.y = t*0.35;
+    knot.rotation.z = Math.cos(t*0.5)*0.25;
+
+    // float sprites
+    for (const sp of floatingSprites){
+      sp.position.add(sp.userData.vel);
+      // gentle bounds and bounce
+      if (sp.position.y > 4 || sp.position.y < -1) sp.userData.vel.y *= -1;
+      if (sp.position.x > 8 || sp.position.x < -8) sp.userData.vel.x *= -1;
+      if (sp.position.z > 10 || sp.position.z < -10) sp.userData.vel.z *= -1;
+      // subtle pulsing
+      const s = 0.9 + 0.08 * Math.sin(t*2 + sp.position.x + sp.position.z);
+      sp.scale.setScalar(s);
+    }
+
+    // rotate poster slowly for subtle effect (but keep it readable)
+    poster.rotation.y = Math.sin(t*0.2)*0.08 - 0.12;
+
+    // camera gentle motion
+    camera.position.x = Math.sin(t*0.2)*0.6;
+    camera.position.y = 1.6 + Math.sin(t*0.12)*0.12;
+    camera.lookAt(0, 0.6, 0);
+
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // window resize
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // interaction: spawn small bursts at click
+  function worldPosFromScreen(x, y){
+    const ndc = new THREE.Vector2( (x/innerWidth)*2 -1, -(y/innerHeight)*2 +1 );
+    const vec = new THREE.Vector3(ndc.x, ndc.y, 0.5).unproject(camera);
+    return vec;
+  }
+  function spawnBurst(screenX, screenY, count=14){
+    const base = worldPosFromScreen(screenX, screenY);
+    for (let i=0;i<count;i++){
+      const txt = phrases[Math.floor(Math.random()*phrases.length)];
+      const spr = makeTextSprite(txt, 60, '#fff');
+      spr.position.copy(base);
+      spr.userData = { vel: new THREE.Vector3((Math.random()-0.5)*0.12, (Math.random()*0.9)+0.2, (Math.random()-0.5)*0.12), life: 70 + Math.floor(Math.random()*50) };
+      floatingGroup.add(spr);
+      floatingSprites.push(spr);
+    }
+  }
+
+  // cleanup loop for burst sprites (with life)
+  function cleanupLoop(){
+    for (let i = floatingGroup.children.length -1; i >= 0; i--){
+      const sp = floatingGroup.children[i];
+      if (sp.userData && sp.userData.life !== undefined){
+        sp.userData.life--;
+        sp.position.add(sp.userData.vel);
+        sp.userData.vel.y -= 0.002; // gravity
+        // fade out by reducing material opacity if possible
+        if (sp.material && sp.material.map) {
+          sp.material.opacity = Math.max(0, (sp.userData.life / 120));
+        }
+        if (sp.userData.life <= 0){
+          floatingGroup.remove(sp);
+        }
+      }
+    }
+    requestAnimationFrame(cleanupLoop);
+  }
+  cleanupLoop();
+
+  // pointer interaction
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    spawnBurst(e.clientX, e.clientY, 10);
+    beep(0.02, 700 + Math.random()*300, 0.04);
+  });
+
+  // buttons
+  document.getElementById('trollBtn').addEventListener('click', () => {
+    for (let i=0;i<6;i++){
+      spawnBurst(innerWidth*0.5 + (Math.random()-0.5)*300, innerHeight*0.45 + (Math.random()-0.5)*200, 18 + Math.floor(Math.random()*12));
+    }
+    const nameEl = document.querySelector('.big-name');
+    nameEl.style.transition = 'transform 0.12s ease';
+    nameEl.style.transform = 'translateX(-50%) scale(1.06) rotate(-5deg)';
+    setTimeout(()=> nameEl.style.transform = 'translateX(-50%) scale(1) rotate(0deg)', 260);
+    beepSequence([0.05,0.04,0.05], [900,1200,750], 0.03);
+  });
+
+  document.getElementById('calmBtn').addEventListener('click', () => {
+    // slow velocities and remove burst sprites
+    for (const sp of floatingSprites){
+      if (sp.userData && sp.userData.vel) sp.userData.vel.multiplyScalar(0.06);
+    }
+    setTimeout(()=>{
+      // remove sprites created in bursts (those with life)
+      for (let i = floatingGroup.children.length -1; i >= 0; i--){
+        const sp = floatingGroup.children[i];
+        if (sp.userData && sp.userData.life !== undefined) floatingGroup.remove(sp);
+      }
+    }, 400);
+    beep(0.04, 240, 0.06);
+  });
+
+  // basic WebAudio beeps
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function beep(duration=0.05, freq=440, gain=0.05){
+    try {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.value = gain;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start();
+      setTimeout(()=> { o.stop(); }, duration*1000);
+    } catch(e){}
+  }
+  function beepSequence(durs, freqs, gain){
+    let delay = 0;
+    for (let i=0;i<durs.length;i++){
+      setTimeout(()=> beep(durs[i], freqs[i], gain), delay*1000);
+      delay += durs[i]*800;
+    }
+  }
+
+  // polite console note
+  console.log("This page is for playful, harmless pranks — be kind and don't use it to embarrass someone.");
+  </script>
+</body>
+</html>
